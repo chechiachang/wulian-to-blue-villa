@@ -1,0 +1,589 @@
+/*
+ * 連線及控制設備主程式
+ * 主要作接收及傳送
+ */
+package td.servlet;
+
+import java.io.IOException;
+import java.io.PrintWriter;
+import javax.servlet.ServletException;
+import javax.servlet.http.HttpServlet;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+
+import java.sql.*;
+
+import java.util.Set;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import cc.wulian.ihome.wan.json.*;
+//import td.callback.HandleCallBack;
+import td.tools.HeartTask;
+import td.tools.MacAddressUtil;
+//import td.ui.JListModel;
+import cc.wulian.ihome.wan.MessageCallback;
+import cc.wulian.ihome.wan.NetSDK;
+import cc.wulian.ihome.wan.entity.DeviceEPInfo;
+import cc.wulian.ihome.wan.entity.DeviceIRInfo;
+import cc.wulian.ihome.wan.entity.DeviceInfo;
+import cc.wulian.ihome.wan.entity.GatewayInfo;
+import cc.wulian.ihome.wan.entity.MonitorInfo;
+import cc.wulian.ihome.wan.entity.RegisterInfo;
+import cc.wulian.ihome.wan.entity.RoomInfo;
+import cc.wulian.ihome.wan.entity.SceneInfo;
+import cc.wulian.ihome.wan.entity.TaskInfo;
+import cc.wulian.ihome.wan.json.JSONArray;
+//import cc.wulian.ihome.wan.util.AppType;
+import cc.wulian.ihome.wan.util.Logger;
+import cc.wulian.ihome.wan.util.MD5Util;
+
+/**
+ *
+ * @author OniYY
+ */
+public class Transervlet extends HttpServlet {
+
+    static final String JDBC_DRIVER = "com.mysql.jdbc.Driver";
+    static final String DB_URL = "jdbc:mysql://localhost:3306/wulian?connectTimeout=3000";
+    //  Database credentials
+    static final String USER = "wulian";
+    static final String PASS = "wulian";
+    private static final long serialVersionUID = 1L;
+//    private HandleCallBack mCallback;
+    private HeartTask mHeartTask;
+    private MacAddressUtil mMacAddress;
+//    private JListModel mListModel;
+    ScheduledExecutorService scheduleService = new ScheduledThreadPoolExecutor(2);
+    Runnable heartRunnable = null;
+    ScheduledFuture<?> future;
+
+    /**
+     * Processes requests for both HTTP <code>GET</code> and <code>POST</code> methods.
+     * @param request servlet request
+     * @param response servlet response
+     * @throws ServletException if a servlet-specific error occurs
+     * @throws IOException if an I/O error occurs
+     * @throws SQLException if an I/O error occurs
+     */
+    protected void processRequest(HttpServletRequest request, HttpServletResponse response)
+            throws ServletException, IOException {
+        response.setContentType("text/html;charset=UTF-8");
+        PrintWriter out = response.getWriter();
+        Connection conn = null;
+        Statement stmt = null;
+        ResultSet rs = null;
+
+        try {
+            Class.forName("com.mysql.jdbc.Driver");
+            System.out.println("Connecting to database...");
+            conn = DriverManager.getConnection(DB_URL, USER, PASS);
+
+            RegisterInfo info = new RegisterInfo("1111111111111111");
+
+            String strCmd = request.getParameter("cmd");//欲控制的功能
+
+            /*
+             * 此段是以servlet做訊息交換，相關接值的命令與之後的動作，可以自訂
+             */
+            //↓↓↓↓連線到GateWay,cmd=connect↓↓↓↓
+            if (strCmd.equals("connect")) {
+                JSONObject opts = new JSONObject();//使用 json 物件
+                this.init();// API 設備初始化
+                //↓↓↓↓註冊 GateWay ↓↓↓↓
+               info.setNetCountryIso("CN");
+               info.setSdkToken("20050612");
+               info.setSimId("aaa");
+               info.setSimSerialNo("ddddddd");
+               info.setNetOperator("1");
+               info.setNetType(1);
+               info.setNetOperatorName("test");
+               info.setAppType(AppType.TYPE_PC);
+               info.setAppID(info.getDeviceId());
+                //↓↓↓↓取得由前端接到的設備 ID 與欲連接之設備密碼(MD5加密)↓↓↓↓
+                System.out.println(request.getParameter("strGwID") + ";" + MD5Util.encrypt(request.getParameter("strPwd")));
+//                NetSDK.initClientSocketParams(request.getParameter("strGwID"), MD5Util.encrypt(request.getParameter("strPwd")), info);
+                this.connect(request.getParameter("strGwID"),request.getParameter("strPwd"));
+
+                //↓↓↓↓開始執行資料庫相關動作↓↓↓↓
+                stmt = conn.createStatement();
+                String strSql = "truncate table devices";
+                stmt.executeUpdate(strSql);
+//                NetSDK.sendConnectGwMsg(request.getParameter("strGwID").trim(), MD5Util.encrypt(request.getParameter("strPwd").trim()), info);
+
+                if (NetSDK.isConnected(request.getParameter("strGwID"))) {
+                    System.out.println("========設備連線========");
+                    opts.put("result", "1");
+                    opts.toString();
+                    out.print(opts.toString());
+                } else {
+                    opts.put("result", "0");
+                    out.print(opts.toString());
+                }
+                //↓↓↓↓控制設備命令,cmd=control↓↓↓↓
+            } else if (strCmd.equals("control") && NetSDK.isConnected(request.getParameter("strGwID"))) {
+                System.out.println("========控制設備========");
+                NetSDK.sendControlDevMsg(request.getParameter("strGwID"), request.getParameter("strDevID"), "14", request.getParameter("strDevType"), request.getParameter("strCtrlData"));
+                //↓↓↓↓離線命令,cmd=disconnect，並將結果以JSON格式傳到前端{result,0}↓↓↓↓
+            } else if (strCmd.equals("disconnect")) {
+                JSONObject opts = new JSONObject();
+                System.out.println("========與設備斷線========" + request.getParameter("strGwID"));
+//                NetSDK.uninit();//釋放資源
+//                NetSDK.sendDisConnectGwMsg(request.getParameter("strGwID"));
+//                NetSDK.disconnect();
+                mHeartTask = new HeartTask();
+                mHeartTask.endTimer();
+                if (!NetSDK.isConnected(request.getParameter("strGwID"))) {
+                    System.out.println("========設備離線========");
+                    opts.put("result", "0");
+                    opts.toString();
+                    out.print(opts.toString());
+                }
+                //↓↓↓↓傳送所有上線中設備到前端,cmd=gatalldevices↓↓↓↓
+            } else if (strCmd.equals("getalldevices")) {
+                JSONObject opts = new JSONObject();
+                stmt = conn.createStatement();
+                String strSql = "select * from devices";
+                rs = stmt.executeQuery(strSql);
+                //↓↓↓↓將設備資料撈出，組成 Json 格式後送到前端↓↓↓↓
+                while (rs.next()) {
+                    opts.put("id,devID,devInfo,devDataText,epType,devStatus,openCtrlData,closeCtrlData,stopCtrlData,uTime", rs.getString(1) + rs.getString(2) + rs.getString(3) + rs.getString(4) + rs.getString(5) + rs.getString(6) + rs.getString(7) + rs.getString(8) + rs.getString(9) + rs.getString(10));
+                    opts.toString();
+                    out.print(opts.toString());
+                }
+                rs.close();
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            out.close();
+            try {
+                if (stmt != null) {
+                    stmt.close();
+                }
+            } catch (SQLException se2) {
+                se2.printStackTrace();
+            }// nothing we can do
+            try {
+                if (conn != null) {
+                    conn.close();
+                }
+            } catch (SQLException se) {
+                se.printStackTrace();
+            }//end finally try
+        }
+    }
+
+    public void connect(String strGwID, String strGwPw){
+		//与欲望连接
+//		RegisterInfo info = new RegisterInfo("111111111111111");
+//		info.setSimId("aaa");
+//		info.setSimSerialNo("ddddddd");
+//		NetSDK.connectLan("50294D4001FE","10.0.100.101", MD5Util.encrypt("4001FE"), info);
+
+		//连接注册信息
+		RegisterInfo info = new RegisterInfo("2234567890456799");
+		info.setSimId("aaa");
+		info.setSimSerialNo("ddddddd");
+		NetSDK.connect(strGwID, MD5Util.encrypt(strGwPw), info);
+
+//		RegisterInfo info2 = new RegisterInfo("1234567890456799");
+//		info2.setSimId("aaa");
+//		info2.setSimSerialNo("ddddddd");
+//		NetSDK.connect("DC16EB8ECDC1", MD5Util.encrypt("123456"), info2);
+
+	}
+
+    // <editor-fold defaultstate="collapsed" desc="HttpServlet methods. Click on the + sign on the left to edit the code.">
+    /**
+     * Handles the HTTP <code>GET</code> method.
+     * @param request servlet request
+     * @param response servlet response
+     * @throws ServletException if a servlet-specific error occurs
+     * @throws IOException if an I/O error occurs
+     * @throws SQLException if an I/O error occurs
+     */
+    @Override
+    protected void doGet(HttpServletRequest request, HttpServletResponse response)
+            throws ServletException, IOException {
+        processRequest(request, response);
+    }
+
+    /**
+     * Handles the HTTP <code>POST</code> method.
+     * @param request servlet request
+     * @param response servlet response
+     * @throws ServletException if a servlet-specific error occurs
+     * @throws IOException if an I/O error occurs
+     * @throws SQLException if an I/O error occurs
+     */
+    @Override
+    protected void doPost(HttpServletRequest request, HttpServletResponse response)
+            throws ServletException, IOException {
+        processRequest(request, response);
+    }
+
+    /**
+     * Returns a short description of the servlet.
+     * @return a String containing servlet description
+     */
+    @Override
+    public String getServletInfo() {
+        return "Short description";
+    }// </editor-fold>
+
+    public void init() {
+        NetSDK.init(new MessageCallback() {
+
+            @Override
+            public void ConnectServer(int result) {
+                if (result == 0) {
+                    future = scheduleService.scheduleAtFixedRate(heartRunnable, 0, 60000, TimeUnit.MILLISECONDS);
+                } else {
+                    System.out.println("connect fail ~");
+                    if (future != null) {
+                        future.cancel(true);
+                    }
+                }
+
+            }
+
+            @Override
+            public void ConnectGateway(int result, String gwID, GatewayInfo gwInfo) {
+                JSONObject opts = new JSONObject();
+                try {
+                    opts.put("result:", Integer.toString(result));
+                    opts.put("gwID:", gwID);
+                    opts.put("GatewayInfo:", gwInfo.toString());
+                    opts.toString();
+                    System.out.println("ConnectGateway_Json = " + opts.toString());
+                } catch (Exception ex) {
+                }
+                if (result == 0) {
+                    System.out.println("connect success !! " + ",gwID=" + gwID);
+                    NetSDK.sendRefreshDevListMsg(gwID, null);
+                } else {
+                    System.out.println("connect fail !! ");
+                }
+
+            }
+
+            @Override
+            public void SetTimerSceneInfo(String gwID, String mode, String groupID,
+                    String groupName, String status, JSONArray data) {
+            }
+
+            @Override
+            public void SetTaskInfo(String gwID, String version, String sceneID,
+                    String devID, String type, String ep, String epType,
+                    Set<TaskInfo> taskInfoSet) {
+                // TODO Auto-generated method stub
+            }
+
+            @Override
+            public void SetSceneInfo(String mode, SceneInfo sceneInfo) {
+                // TODO Auto-generated method stub
+            }
+
+            @Override
+            public void SetRoomInfo(String mode, RoomInfo roomInfo) {
+                // TODO Auto-generated method stub
+            }
+
+            @Override
+            public void SetMonitorInfo(MonitorInfo monitorInfo) {
+                // TODO Auto-generated method stub
+            }
+
+            @Override
+            public void SetDeviceInfo(String mode, DeviceInfo devInfo,
+                    DeviceEPInfo devEPInfo) {
+                // TODO Auto-generated method stub
+            }
+
+            @Override
+            public void SetDeviceIRInfo(String gwID, String mode, String devID,
+                    String ep, String irType, Set<DeviceIRInfo> devIRInfoSet) {
+                // TODO Auto-generated method stub
+            }
+
+            @Override
+            public void ReportTimerSceneInfo(String gwID, JSONArray data) {
+                // TODO Auto-generated method stub
+            }
+
+            @Override
+            public void GetTimerSceneInfo(String gwID, JSONArray data) {
+                // TODO Auto-generated method stub
+            }
+
+            @Override
+            public void GetTaskInfo(String gwID, String version, String sceneID,
+                    Set<TaskInfo> taskInfoSet) {
+                // TODO Auto-generated method stub
+            }
+
+            @Override
+            public void GetSceneInfo(String gwID, Set<SceneInfo> sceneInfoSet) {
+                // TODO Auto-generated method stub
+            }
+
+            @Override
+            public void GetRoomInfo(String gwID, Set<RoomInfo> roomInfoSet) {
+                // TODO Auto-generated method stub
+            }
+
+            @Override
+            public void GetMonitorInfo(String gwID, Set<MonitorInfo> monitorInfoSet) {
+                // TODO Auto-generated method stub
+            }
+
+            @Override
+            public void GetDeviceIRInfo(String gwID, String devID, String ep,
+                    String mode, Set<DeviceIRInfo> devIRInfoSet) {
+                // TODO Auto-generated method stub
+            }
+
+            @Override
+            public void SetBindSceneInfo(String gwID, String mode, String devID,
+                    JSONArray data) {
+                // TODO Auto-generated method stub
+            }
+
+            @Override
+            public void SetBindDevInfo(String gwID, String mode, String devID,
+                    JSONArray data) {
+                // TODO Auto-generated method stub
+            }
+
+            @Override
+            public void QueryDevRssiInfo(String gwID, String devID, String data) {
+                // TODO Auto-generated method stub
+            }
+
+            @Override
+            public void QueryDevRelaInfo(String gwID, String devID, String data) {
+                // TODO Auto-generated method stub
+            }
+
+            @Override
+            public void PermitDevJoin(String gwID, String devID, String data) {
+                // TODO Auto-generated method stub
+            }
+
+            @Override
+            public void GetBindSceneInfo(String gwID, String devID, JSONArray data) {
+                // TODO Auto-generated method stub
+            }
+
+            @Override
+            public void GetBindDevInfo(String gwID, String devID, JSONArray data) {
+                // TODO Auto-generated method stub
+            }
+
+            @Override
+            public void DeviceHardData(String gwID, String devID, String devType,
+                    String data) {
+                // TODO Auto-generated method stub
+            }
+
+            @Override
+            public void GetDevRecordInfo(String gwID, String mode, String count,
+                    JSONArray data) {
+                // TODO Auto-generated method stub
+            }
+
+            @Override
+            public void GetDevAlarmNum(String gwID, String userID, String devID,
+                    String data) {
+                // TODO Auto-generated method stub
+            }
+
+            @Override
+            public void PushUserChatSome(String gwID, String userType, String userID,
+                    String from, String alias, String to, String time, String data) {
+                // TODO Auto-generated method stub
+            }
+
+            @Override
+            public void PushUserChatMsg(String gwID, String userType, String userID,
+                    String from, String alias, String time, String data) {
+                // TODO Auto-generated method stub
+            }
+
+            @Override
+            public void PushUserChatAll(String gwID, String userType, String userID,
+                    String from, String alias, String time, String data) {
+                // TODO Auto-generated method stub
+            }
+
+            @Override
+            public void GatewayDown(String gwID) {
+                // TODO Auto-generated method stub
+            }
+
+            @Override
+            public void GatewayData(int result, String gwID) {
+                // TODO Auto-generated method stub
+            }
+
+            @Override
+            public void DisConnectGateway(int result, String gwID) {
+                // TODO Auto-generated method stub
+            }
+
+            @Override
+            public void DeviceUp(DeviceInfo devInfo, Set<DeviceEPInfo> devEPInfoSet, boolean isFirst) {
+
+                String devID = devInfo.getDevID();
+                JSONObject opts = new JSONObject();
+                Connection conn = null;
+                Statement stmt = null;
+                ResultSet rs = null;
+                try {
+                    java.util.Date now = new java.util.Date();
+                    conn = DriverManager.getConnection(DB_URL, USER, PASS);
+                    String strDelSql = "delete from devices where devID = '" + devID + "'";
+                    String strInsSql = "insert into devices(devID,devInfo ,uTime) values('" + devID + "','" + devInfo.getData().toString() + "','" + (int) now.getTime() / 1000 + "')";
+                    stmt = conn.createStatement();
+                    stmt.executeUpdate(strDelSql);
+                    stmt.executeUpdate(strInsSql);
+                    stmt.close();
+                    conn.close();
+                } catch (SQLException ex) {
+                    ex.printStackTrace();
+                } finally {
+                    try {
+                        if (stmt != null) {
+                            stmt.close();
+                        }
+                    } catch (SQLException se2) {
+                        se2.printStackTrace();
+                    }// nothing we can do
+                    try {
+                        if (conn != null) {
+                            conn.close();
+                        }
+                    } catch (SQLException se) {
+                        se.printStackTrace();
+                    }//end finally try
+                }
+                devInfo.setDevEPInfo((DeviceEPInfo) devEPInfoSet.toArray()[0]);
+                System.out.println("Device startup !! :" + "devID:" + devInfo.getDevID());
+            }
+
+            @Override
+            public void DeviceDown(String gwID, String devID) {
+                // TODO Auto-generated method stub
+            }
+
+            @Override
+            public void DeviceData(String gwID, String devID, String devType,
+                    DeviceEPInfo devEPInfo) {
+                DeviceInfo devInfo = new DeviceInfo();
+                JSONObject opts = new JSONObject();
+
+                Connection conn = null;
+                Statement stmt = null;
+                ResultSet rs = null;
+
+                try {
+                    opts.put("devID:", devID);
+                    opts.put("gwID:", gwID);
+                    opts.put("devType:", devType);
+                    opts.put("DeviceInfo:", devEPInfo.toString());
+                    opts.toString();
+                    System.out.println("DeviceData_Json = " + opts.toString());
+                } catch (Exception ex) {
+                    ex.printStackTrace();
+                }
+                devInfo.setGwID(gwID);
+                devInfo.setDevID(devID);
+                devInfo.setDevEPInfo(devEPInfo);
+
+                String boodevStatus = "1";
+
+                try {
+                    conn = DriverManager.getConnection(DB_URL, USER, PASS);
+                    String strSql = "update devices set "
+                            + "devDataText = '" + td.tools.DeviceTool.getDevDataText(devEPInfo.getEpType(), devEPInfo.getEpData(), devEPInfo.getEpStatus()) + "',"
+                            + "epType = '" + devInfo.getType() + "',"
+                            + "devStatus = '" + boodevStatus + "',"
+                            + "openCtrlData = '" + td.tools.DeviceTool.getOpenCtrlData(devType) + "',"
+                            + "closeCtrlData = '" + td.tools.DeviceTool.getCloseCtrlData(devType) + "',"
+                            + "stopCtrlData  = '" + td.tools.DeviceTool.getStopOrDelayCtrlData(devType) + "' "
+                            + "where devID ='" + devID + "'";
+                    stmt = conn.createStatement();
+                    stmt.executeUpdate(strSql);
+                    stmt.close();
+                    conn.close();
+                } catch (SQLException ex) {
+                    ex.printStackTrace();
+                } finally {
+                    try {
+                        if (stmt != null) {
+                            stmt.close();
+                        }
+                    } catch (SQLException se2) {
+                        se2.printStackTrace();
+                    }// nothing we can do
+                    try {
+                        if (conn != null) {
+                            conn.close();
+                        }
+                    } catch (SQLException se) {
+                        se.printStackTrace();
+                    }//end finally try
+                }
+            }
+
+            @Override
+            public void HandleException(String gwID, Exception e) {
+                Logger.debug(e.getMessage());
+            }
+
+            @Override
+            public void SetCombindDevInfo(String gwID, String mode,
+                    String bindID, String name, String roomID,
+                    String devIDLeft, String devIDRight) {
+                // TODO Auto-generated method stub
+            }
+
+            @Override
+            public void GetCombindDevInfo(String gwID,
+                    JSONArray data) {
+                // TODO Auto-generated method stub
+            }
+
+            @Override
+            public void readOfflineDevices(String gwID, String status) {
+                // TODO Auto-generated method stub
+            }
+
+            @Override
+            public void setGatewayInfo(String gwID, String mode, String gwVer,
+                    String gwName, String gwLocation, String gwPath) {
+                // TODO Auto-generated method stub
+            }
+
+            @Override
+            public void reqeustOrSetTwoStateConfigration(String mode,
+                    String gwID, String devID, String ep, JSONArray data) {
+                // TODO Auto-generated method stub
+            }
+
+            @Override
+            public void sendControlGroupDevices(String gwID, String group,
+                    String mode, String data) {
+                // TODO Auto-generated method stub
+            }
+
+            @Override
+            public void offlineDevicesBack(DeviceInfo devcieInfo,
+                    Set<DeviceEPInfo> deviceEpInfoSet) {
+                // TODO Auto-generated method stub
+            }
+        });
+    }
+}
