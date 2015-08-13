@@ -39,14 +39,14 @@
 
 
             function GetConnect() {
-                $.get("Transervlet", {"cmd": "connect", "strGwID": "50294D2070F5", "strPwd": "2070F5"}, function (back) {
-                //$.get("Transervlet", {"cmd": "connect", "strGwID": "40124CDC6628", "strPwd": "DC6628"}, function (back) {
+                //$.get("Transervlet", {"cmd": "connect", "strGwID": "50294D2070F5", "strPwd": "2070F5"}, function (back) {
+                $.get("Transervlet", {"cmd": "connect", "strGwID": "40124CDC6628", "strPwd": "DC6628"}, function (back) {
                     PrintLog("connect", back);
                 });
             }
             function GetDisconnect() {
-                //$.get("Transervlet", {"cmd": "disconnect", "strGwID": "40124CDC6628", "strPwd": "DC6628"}, function (back) {
-                $.get("Transervlet", {"cmd": "connect", "strGwID": "50294D2070F5", "strPwd": "2070F5"}, function (back) {
+                $.get("Transervlet", {"cmd": "disconnect", "strGwID": "40124CDC6628", "strPwd": "DC6628"}, function (back) {
+                //$.get("Transervlet", {"cmd": "connect", "strGwID": "50294D2070F5", "strPwd": "2070F5"}, function (back) {
                     PrintLog("disconnect", back);
                 });
             }
