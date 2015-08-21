@@ -16,10 +16,10 @@
         <h1>Kingsbeam Connection Service</h1>
         <div id="responseLog"></div>
         <script>
-            var refreshInterval = 6 * 60 * 60 * 1000;
+            var refreshInterval = 2 * 60 * 60 * 1000;
 
             $(function () {
-                PrintLog("Startup", "Time interval:" + 6 + "hours");
+                PrintLog("Startup", "Time interval:" + 2 + "hours");
                 setTimeout(function () {
                     GetDisconnect();
                     setTimeout(function () {
@@ -29,24 +29,27 @@
             });
 
             setInterval(function () {
+                /*
                 setTimeout(function () {
                     GetDisconnect();
                     setTimeout(function () {
                         GetConnect();
                     }, 1000);
                 }, 1000);
+                */
+               window.location.href="index.jsp"
             }, refreshInterval);
 
 
             function GetConnect() {
-                //$.get("Transervlet", {"cmd": "connect", "strGwID": "50294D2070F5", "strPwd": "2070F5"}, function (back) {
-                $.get("Transervlet", {"cmd": "connect", "strGwID": "40124CDC6628", "strPwd": "DC6628"}, function (back) {
+                $.get("Transervlet", {"cmd": "connect", "strGwID": "50294D2070F5", "strPwd": "2070F5"}, function (back) {
+                //$.get("Transervlet", {"cmd": "connect", "strGwID": "40124CDC6628", "strPwd": "DC6628"}, function (back) {
                     PrintLog("connect", back);
                 });
             }
             function GetDisconnect() {
-                $.get("Transervlet", {"cmd": "disconnect", "strGwID": "40124CDC6628", "strPwd": "DC6628"}, function (back) {
-                //$.get("Transervlet", {"cmd": "connect", "strGwID": "50294D2070F5", "strPwd": "2070F5"}, function (back) {
+                //$.get("Transervlet", {"cmd": "disconnect", "strGwID": "40124CDC6628", "strPwd": "DC6628"}, function (back) {
+                $.get("Transervlet", {"cmd": "connect", "strGwID": "50294D2070F5", "strPwd": "2070F5"}, function (back) {
                     PrintLog("disconnect", back);
                 });
             }

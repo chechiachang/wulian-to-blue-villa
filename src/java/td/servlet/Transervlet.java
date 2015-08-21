@@ -423,6 +423,7 @@ public class Transervlet extends HttpServlet {
                     String strInsSql = "INSERT INTO `devices` SET "
                             + "devID = '" + devID + "', "
                             + "devDataText = '" + jsonObject.get("epData").toString() + "', "
+                            + "devStatus = '" + jsonObject.get("epData").toString() + "', "
                             //0330 test need epType 
                             + "epType = '" + jsonObject.get("epType").toString() + "', "
                             //+ devInfo.getData().toString() + "', "
@@ -497,10 +498,11 @@ public class Transervlet extends HttpServlet {
                     conn = DriverManager.getConnection(DB_URL, USER, PASS);
                     String strSql = "update devices set "
                             //
-                            + "devDataText = '" + td.tools.DeviceTool.getDevDataText(devEPInfo.getEpType(), devEPInfo.getEpData(), devEPInfo.getEpStatus()) + "',"
+                            + "devDataText = '" + devEPInfo.getEpData() + "',"
                             //+ "epType = '" + devInfo.getType() + "',"
                             + "epType = '" + devType + "',"
-                            + "devStatus = '" + boodevStatus + "' "
+                            //+ "devStatus = '" + boodevStatus + "' "
+                            + "devStatus = '" + td.tools.DeviceTool.getDevDataText(devEPInfo.getEpType(), devEPInfo.getEpData(), devEPInfo.getEpStatus()) + "' "
                             //+ "openCtrlData = '" + td.tools.DeviceTool.getOpenCtrlData(devType) + "',"
                             //+ "closeCtrlData = '" + td.tools.DeviceTool.getCloseCtrlData(devType) + "',"
                             //+ "stopCtrlData  = '" + td.tools.DeviceTool.getStopOrDelayCtrlData(devType) + "' "
